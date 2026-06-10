@@ -115,3 +115,22 @@ FROM notifications
 WHERE notificationType = 'Placement' 
   AND createdAt >= NOW() - INTERVAL '7 days';
 ```
+
+---
+
+## Stage 4
+### Strategy to Reduce Database Overwhelm
+Fetching notifications strictly on page load means the database is hammered with reads even when no new notifications exist. 
+
+**Solutions & Tradeoffs**:
+1. **Caching (Redis)**
+   - *Approach*: Cache the user's latest notifications and unread count in Redis. Fetch from the DB only on cache miss.
+   - *Tradeoff*: Increases infrastructure complexity and requires careful cache invalidation when a new notification arrives or is marked as read.
+2. **Push over Pull (SSE/WebSockets)**
+   - *Approach*: Send notifications directly to the client when they occur. The client caches them locally (e.g., Redux, LocalStorage) and doesn't need to ask the server on page load.
+   - *Tradeoff*: Requires maintaining persistent connections for thousands of active users, increasing server memory overhead.
+3. **Optimistic UI & Lazy Loading**
+   - *Approach*: Only fetch notifications when the user actually clicks the notification bell, rather than strictly on page load.
+   - *Tradeoff*: Notifications count isn't immediately visible, potentially degrading user experience for high-priority alerts.
+
+**Suggested Implementation**: Combine Redis for caching the unread count (loaded on page load) and SSE to push real-time updates. The heavy payload (the list of notifications) is only fetched when the user opens the notification panel.
