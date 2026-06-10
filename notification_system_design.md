@@ -134,3 +134,41 @@ Fetching notifications strictly on page load means the database is hammered with
    - *Tradeoff*: Notifications count isn't immediately visible, potentially degrading user experience for high-priority alerts.
 
 **Suggested Implementation**: Combine Redis for caching the unread count (loaded on page load) and SSE to push real-time updates. The heavy payload (the list of notifications) is only fetched when the user opens the notification panel.
+
+---
+
+## Stage 5
+### Shortcomings of the `notify_all` Implementation
+1. **Synchronous Execution**: The loop blocks the thread. Sending 50,000 emails synchronously via a third-party API will take minutes to hours.
+2. **Lack of Fault Tolerance**: When the email API failed for the 200 students, the loop likely crashed. We have no mechanism to retry those 200 without accidentally re-notifying the others.
+3. **Tight Coupling**: Saving to the database and sending an email happen in the same tight loop. A failure in one affects the other. 
+
+The DB save and Email send should **not** happen simultaneously in the same function. Database inserts are fast, while external network calls (email) are slow and unreliable. They should be decoupled using an Event-Driven architecture (Message Queues).
+
+### Revised Pseudocode (Message Queue Architecture)
+```python
+# API Endpoint Handler
+function notify_all(student_ids: array, message: string):
+    # 1. Bulk insert to DB immediately (Fast)
+    save_to_db_bulk(student_ids, message)
+    
+    # 2. Push to Message Queue (e.g., RabbitMQ/Kafka) (Fast)
+    for student_id in student_ids:
+        enqueue_message("email_queue", {student_id, message})
+        enqueue_message("push_queue", {student_id, message})
+
+# Worker 1 (Consumer for Emails - runs independently)
+function process_email_queue():
+    while job = dequeue("email_queue"):
+        try:
+            send_email(job.student_id, job.message)
+            ack_job(job)
+        except EmailAPIError:
+            retry_job_later(job) # Exponential backoff
+
+# Worker 2 (Consumer for Push Notifications - runs independently)
+function process_push_queue():
+    while job = dequeue("push_queue"):
+        push_to_app(job.student_id, job.message)
+        ack_job(job)
+```
