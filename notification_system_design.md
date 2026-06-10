@@ -94,3 +94,24 @@ UPDATE notifications
 SET is_read = true 
 WHERE id = ? AND student_id = ?;
 ```
+
+---
+
+## Stage 3
+**Query Analysis**
+```sql
+SELECT * FROM notifications WHERE studentID = 1042 AND isRead = false ORDER BY createdAt ASC;
+```
+- **Accuracy**: Yes, the query accurately fetches the unread notifications for a specific student and sorts them chronologically.
+- **Why is it slow?**: Without a composite index, the database is forced to perform a sequential scan or a sub-optimal index scan, scanning many irrelevant rows to find `isRead = false` for that specific `studentID`, and then performs an expensive sort operation on `createdAt`.
+- **What to change**: Add a composite index on the exact fields queried and sorted: `CREATE INDEX idx_student_unread ON notifications (studentID, isRead, createdAt ASC);`.
+- **Computation Cost**: With the index, it goes from O(N) full table scan down to O(log N) for the B-Tree traversal, drastically reducing I/O.
+- **Index Every Column?**: No, this is terrible advice. Every index slows down `INSERT`, `UPDATE`, and `DELETE` operations because the database must update the indexes too. It also consumes massive amounts of disk space and memory (buffer cache).
+
+**Placement Notification Query (Last 7 Days)**
+```sql
+SELECT DISTINCT studentID 
+FROM notifications 
+WHERE notificationType = 'Placement' 
+  AND createdAt >= NOW() - INTERVAL '7 days';
+```
